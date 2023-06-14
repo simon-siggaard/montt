@@ -1,0 +1,6 @@
+task first :before second :resources Simon :estimate 1 :q95 2
+task second :before third :resources Simon
+task third :before fourth :resources Simon
+task fourth :resources Simon
+
+resource Simon
