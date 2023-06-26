@@ -1,41 +1,52 @@
+mod cli;
 mod montt;
+mod statistics;
 
-use crate::montt::Montt;
+use std::collections::HashMap;
 
-use clap::{Parser, ValueEnum};
+use clap::Parser;
+use cli::{Cli, Commands, ForecastFilter};
+use montt::{Montt, Sample};
 
-#[derive(Parser)]
-#[command(author, version, about, long_about=None)]
-struct Cli {
-    /// The .montt project description file to use.
-    #[arg(short, long, default_value = "project.montt")]
-    project: String,
+impl Cli {
+    fn run(self, montt: Montt) -> Result<(), Box<dyn std::error::Error>> {
+        match self.command {
+            Commands::CriticalPath => {
+                let cp = montt.critical_path();
+                println!("Critical path:\n{:?}", cp);
+            }
+            Commands::Forecast {
+                sample_size,
+                filter:
+                    ForecastFilter {
+                        most_likely,
+                        quantile,
+                    },
+                commands,
+            } => {
+                let mut samples = HashMap::<usize, usize>::new();
+                for i in 0..sample_size {
+                    let estimate = montt.sample() as usize;
+                    if let Some(s) = samples.get_mut(&estimate) {
+                        *s += 1;
+                    } else {
+                        samples.insert(estimate, 1);
+                    }
+                    if i % 10000 == 0 {
+                        println!("Sampled {} of {}.", i, sample_size);
+                    }
+                }
 
-    /// Don't forecast, even if estimate quantiles are provided.
-    #[arg(long, default_value = "false")]
-    no_forecast: bool,
+                println!("{:?}", samples);
+            }
+        }
 
-    /// The number of random samples to take when forecasting.
-    #[arg(short = 'n', long, default_value = "1000000")]
-    sample_size: usize,
-
-    /// The output format to use.
-    #[arg(short, long, default_value = "json")]
-    output: Output,
-}
-
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
-enum Output {
-    /// Output a Gantt chart in the form of a mermaid diagram.
-    Mermaid,
-    /// Output an HTML document containing a sankey representation of the forecast.
-    Sankey,
-    /// Output the forecast as a JSON document.
-    Json,
+        Ok(())
+    }
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     let montt = Montt::parse(&cli.project)?;
-    Ok(())
+    cli.run(montt)
 }

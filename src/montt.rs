@@ -1,5 +1,8 @@
-use std::collections::HashSet;
-use std::{error::Error, fs};
+use std::{collections::VecDeque, error::Error, fs};
+
+use crate::{cli::TaskCriticalPathArgs, statistics::log_normal_from_estimates};
+use rand;
+use rand_distr::{Distribution, LogNormal};
 
 #[derive(Default, Debug)]
 pub struct Montt {
@@ -7,11 +10,102 @@ pub struct Montt {
     tasks: Vec<Task>,
 }
 
-#[derive(Default, Debug)]
+pub struct CriticalPath {
+    tasks: Vec<Task>,
+}
+
+impl CriticalPath {
+    pub fn duration(&self) -> f64 {
+        self.tasks.iter().map(|task| task.estimate).sum()
+    }
+}
+
+impl Montt {
+    pub fn log_normal(&self) -> LogNormalMontt {
+        LogNormalMontt {
+            adjacency: self.adjacency.clone(),
+            tasks: self.tasks.iter().map(|task| task.log_normal()).collect(),
+        }
+    }
+
+    /// Calculates the critical path of the project.
+    /// Based on https://stackoverflow.com/questions/6007289/calculating-the-critical-path-of-a-graph
+    pub fn critical_path(&self) -> CriticalPath {
+        let mut indegrees = self
+            .adjacency
+            .iter()
+            .map(|row| row.iter().filter(|&&x| x == -1).count())
+            .collect::<Vec<_>>();
+
+        let mut q = VecDeque::new();
+        for &indegree in &indegrees {
+            if indegree == 0 {
+                q.push_back(indegree);
+            }
+        }
+
+        let mut distances = vec![0.0; self.tasks.len()];
+        while !q.is_empty() {
+            let v = q.pop_front().unwrap();
+            for (u, &direction) in self.adjacency[v].iter().enumerate() {
+                distances[u] = (distances[v] + self.tasks[v].estimate).max(distances[u]);
+                indegrees[u] -= 1;
+                if indegrees[u] == 0 {
+                    q.push_back(u);
+                }
+            }
+        }
+
+        CriticalPath {
+            tasks: self.tasks.iter().map(|&task| task.clone()).collect(),
+        }
+    }
+}
+
+pub trait Sample {
+    fn sample(&self) -> f64;
+}
+
+impl Sample for Montt {
+    fn sample(&self) -> f64 {
+        self.critical_path().duration()
+    }
+}
+
+struct LogNormalMontt {
+    adjacency: Vec<Vec<i64>>,
+    tasks: Vec<LogNormal<f64>>,
+}
+
+impl Sample for LogNormalMontt {
+    fn sample(&self) -> f64 {
+        0.0
+    }
+}
+
+#[derive(Default, Debug, Clone)]
 pub struct Task {
     name: String,
     estimate: f64,
     q95: f64,
+}
+
+impl Task {
+    fn log_normal(&self) -> LogNormal<f64> {
+        log_normal_from_estimates(self.estimate, self.q95)
+    }
+}
+
+impl Sample for Task {
+    fn sample(&self) -> f64 {
+        self.estimate
+    }
+}
+
+impl Sample for LogNormal<f64> {
+    fn sample(&self) -> f64 {
+        Distribution::sample(&self, &mut rand::thread_rng())
+    }
 }
 
 #[derive(Default, Debug)]
