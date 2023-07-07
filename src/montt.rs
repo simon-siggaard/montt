@@ -10,6 +10,7 @@ pub struct Montt {
     tasks: Vec<Task>,
 }
 
+#[derive(Debug)]
 pub struct CriticalPath {
     tasks: Vec<Task>,
 }
@@ -38,17 +39,17 @@ impl Montt {
             .collect::<Vec<_>>();
 
         let mut q = VecDeque::new();
-        for &indegree in &indegrees {
+        for (v, &indegree) in indegrees.iter().enumerate() {
             if indegree == 0 {
-                q.push_back(indegree);
+                q.push_back(v);
             }
         }
 
-        let mut distances = vec![0.0; self.tasks.len()];
+        let mut distance = vec![0.0; self.tasks.len()];
         while !q.is_empty() {
             let v = q.pop_front().unwrap();
-            for (u, &direction) in self.adjacency[v].iter().enumerate() {
-                distances[u] = (distances[v] + self.tasks[v].estimate).max(distances[u]);
+            for (u, _) in self.adjacency[v].iter().enumerate().filter(|(_, &d)| d > 0) {
+                distance[u] = (distance[v] + self.tasks[v].estimate).max(distance[u]);
                 indegrees[u] -= 1;
                 if indegrees[u] == 0 {
                     q.push_back(u);
@@ -56,9 +57,44 @@ impl Montt {
             }
         }
 
-        CriticalPath {
-            tasks: self.tasks.iter().map(|&task| task.clone()).collect(),
+        let (last, total_duration) = distance
+            .iter()
+            .enumerate()
+            .map(|(v, &dist)| (v, dist + self.tasks[v].estimate))
+            .fold((0usize, f64::NEG_INFINITY), |(u, longest), (v, dist)| {
+                if dist < longest {
+                    return (u, longest);
+                }
+                return (v, dist);
+            });
+
+        // tasks on the critical path are tasks for which there is no free slack.
+        let mut path = vec![Task {
+            name: self.tasks[last].name.clone(),
+            estimate: self.tasks[last].estimate,
+            q95: self.tasks[last].q95,
+        }];
+
+        let mut previous = Some(last);
+        while let Some(task) = previous {
+            previous = self.adjacency[task]
+                .iter()
+                .enumerate()
+                .filter(|(_, &d)| d < 0)
+                .find(|(u, _)| distance[*u] == distance[task] - self.tasks[*u].estimate)
+                .map(|(u, _)| u);
+
+            if let Some(task) = previous {
+                path.push(Task {
+                    name: self.tasks[task].name.clone(),
+                    estimate: self.tasks[task].estimate,
+                    q95: self.tasks[task].q95,
+                });
+            }
         }
+
+        path.reverse(); // because we've added the tasks in reverse order when we calculated the critical path.
+        CriticalPath { tasks: path }
     }
 }
 

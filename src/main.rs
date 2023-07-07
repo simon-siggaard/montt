@@ -13,7 +13,8 @@ impl Cli {
         match self.command {
             Commands::CriticalPath => {
                 let cp = montt.critical_path();
-                println!("Critical path:\n{:?}", cp);
+                println!("{:?}", cp);
+                println!("Project duration: {}", cp.duration());
             }
             Commands::Forecast {
                 sample_size,
